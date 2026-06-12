@@ -6,6 +6,9 @@ const flashOverlay = document.getElementById('flash-overlay');
 
 // Gemini API Key
 const GEMINI_API_KEY = "AIzaSyCq3NfKQ8Dk3BJw4_qJyuKuKPZz9qZ41lU";
+const CEREBRAS_API_KEY = "csk-n58rpw54npj2jk956mr45t56mkf355886xftvynv8xfnmypx";
+
+let currentProvider = 'gemini'; // Default provider
 
 let animationId;
 let gamePaused = false;
@@ -108,6 +111,14 @@ function keyDownHandler(e) {
   if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
     e.preventDefault();
     downloadVsix();
+    return;
+  }
+
+  // Ctrl+J Shortcut to Switch Provider to Cerebras
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'j' || e.key === 'J')) {
+    e.preventDefault();
+    currentProvider = 'cerebras';
+    console.log("Switched to Cerebras provider");
     return;
   }
 
@@ -403,33 +414,58 @@ async function processPrompt(prompt) {
   drawPaddle();
 
   try {
-    console.log("Fetching from Gemini...");
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        systemInstruction: {
-          parts: [{ text: "You are a stealth assistant. Provide concise, direct answers without conversational filler, as your output will be copied directly to the user's clipboard." }]
+    let res;
+    if (currentProvider === 'gemini') {
+      console.log("Fetching from Gemini...");
+      res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
         },
-        contents: [
-          { parts: [{ text: prompt }] }
-        ],
-        generationConfig: {
+        body: JSON.stringify({
+          systemInstruction: {
+            parts: [{ text: "You are a stealth assistant. Provide concise, direct answers without conversational filler, as your output will be copied directly to the user's clipboard." }]
+          },
+          contents: [
+            { parts: [{ text: prompt }] }
+          ],
+          generationConfig: {
+            temperature: 0.7
+          }
+        })
+      });
+    } else if (currentProvider === 'cerebras') {
+      console.log("Fetching from Cerebras...");
+      res = await fetch(`https://api.cerebras.ai/v1/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${CEREBRAS_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: "gpt-oss-120b",
+          messages: [
+            { role: "system", content: "You are a stealth assistant. Provide concise, direct answers without conversational filler, as your output will be copied directly to the user's clipboard." },
+            { role: "user", content: prompt }
+          ],
           temperature: 0.7
-        }
-      })
-    });
+        })
+      });
+    }
 
     if (!res.ok) {
       const errorData = await res.json().catch(() => ({}));
-      console.error("Gemini API Error Detail:", errorData);
+      console.error("API Error Detail:", errorData);
       throw new Error(`API Request Failed: ${res.status}`);
     }
 
     const data = await res.json();
-    const resultText = data.candidates[0].content.parts[0].text;
+    let resultText = "";
+    if (currentProvider === 'gemini') {
+      resultText = data.candidates[0].content.parts[0].text;
+    } else if (currentProvider === 'cerebras') {
+      resultText = data.choices[0].message.content;
+    }
     console.log("Response received, copying to clipboard...");
 
     try {
